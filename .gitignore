@@ -3,3 +3,22 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Data files
+data/
+data_backup/
+data_v2/
+
+# Model weights
+weights_out/
+weights_out_v2/
+scaler_mean.npy
+
+# Python
+__pycache__/
+
+# Debug
+debug_windows/
+
+# Claude
+.claude/
