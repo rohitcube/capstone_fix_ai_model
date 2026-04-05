@@ -1,5 +1,6 @@
-﻿#include <Arduino.h>
+#include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
@@ -7,21 +8,46 @@
 // =========================
 // User-editable settings
 // =========================
-const char* WIFI_SSID       = "Rohit";
-const char* WIFI_PASSWORD   = "rohit123";
-const char* MQTT_BROKER_IP  = "172.20.10.4";    // Laptop IP on phone hotspot
-const uint16_t MQTT_PORT    = 1883;
+const char* WIFI_SSID       = "iPhone";
+const char* WIFI_PASSWORD   = "Sasikala";
+const char* MQTT_BROKER_IP  = "172.20.10.2";
+const uint16_t MQTT_PORT    = 8883;
 const char* MQTT_TOPIC      = "firebeetle/raw";
 
 // *** CHANGE THIS BEFORE FLASHING EACH BOARD ***
 // Board 1: "arm"    Board 2: "leg"
-const char* DEVICE_NAME     = "leg";
+const char* DEVICE_NAME     = "arm"
+;
 
 const int SAMPLE_RATE_MS = 20; // 50 Hz
 
 // =========================
 
-WiFiClient wifiClient;
+// CA certificate for TLS verification against Mosquitto broker
+const char* ca_cert = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIDUTCCAjmgAwIBAgIUEK5deI7+i0ekbJHefg16Ql8PNaAwDQYJKoZIhvcNAQEL
+BQAwODELMAkGA1UEBhMCU0cxETAPBgNVBAoMCExvY2FsRGV2MRYwFAYDVQQDDA1N
+eU1vc3F1aXR0b0NBMB4XDTI2MDEyNjA0MDkyOVoXDTM2MDEyNDA0MDkyOVowODEL
+MAkGA1UEBhMCU0cxETAPBgNVBAoMCExvY2FsRGV2MRYwFAYDVQQDDA1NeU1vc3F1
+aXR0b0NBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuhDyLQ3iDYQV
+v1Bsc5E7cHOIu19S5+CBbuFFnzG8gUPZYkN3AA6EQMTh45l41a6n3okW2xEdbO06
+fIlsgSaqB6o6KkUFe6Sc7ZC6A8aDf7qkwYuXban3muqwOwNMp2QdITPaTo2brjh0
+oZk4O/1Zxh2RjSdkfUI5JdPalcg9JdOcVouSMhkKdmX+tIwN67gP/ldtOg4JJWwn
+qIhj8OSYIcXbxddsQp5bIQ8ep8ynMZhYdKFf7BxeS2J0XQv2mAaGjTL9S70KSeVg
+cK5qrodG6WUlJYixcuuRjf7G66DlC24kq7QCQLYgvdJak5naCo28fo+n0Oncq/kl
+dXnMWf/SBQIDAQABo1MwUTAdBgNVHQ4EFgQUdjf9GJZEG2XPWdfyPD303jov3Jow
+HwYDVR0jBBgwFoAUdjf9GJZEG2XPWdfyPD303jov3JowDwYDVR0TAQH/BAUwAwEB
+/zANBgkqhkiG9w0BAQsFAAOCAQEAeVVwGqTLPoCnK4w1N7Wah9XQfrox2D6pMATX
+Ew2Yv8VYBIFvCxnB7YzBPiAedXZ9emIxkxZZWIk6ak3rmL8quAf5pHId0nmhPG4U
+RwfGX9OIEowpLHR5M5LW9DwSuDxKph2WU5oIAwtuchwmvo6vzTKBvsPRiV85xEG7
+BIM8/bY3rX1da977wtqbCqD7s28QDIk7vVgVz3+Gb0j/2Fc1QeBj/pCO8vWKpb+k
+kByPMd0VcMRFIi4JAhuX0M8BRjMX6iKGQ0KhidX+eeN83BzTc54RWxZci6hDUfHK
+jb42BVFBt2ENzXxUOJDhEmVps1ovr4VuLpMWayqcAMtQJn7/qA==
+-----END CERTIFICATE-----
+)EOF";
+
+WiFiClientSecure wifiClient;
 PubSubClient mqttClient(wifiClient);
 Adafruit_MPU6050 mpu;
 
@@ -78,6 +104,8 @@ void setup() {
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+
+  wifiClient.setInsecure();  // Skip cert verification for now
 
   mqttClient.setServer(MQTT_BROKER_IP, MQTT_PORT);
   mqttClient.setBufferSize(256);

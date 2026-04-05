@@ -16,7 +16,6 @@ import argparse
 import csv
 import json
 import os
-import ssl
 import sys
 import time
 import threading
@@ -135,6 +134,9 @@ class LiveInference:
         if arm_g < MOTION_THRESHOLD and leg_g < MOTION_THRESHOLD:
             sys.stdout.write(f"\r  [IDLE] gyro arm={arm_g:.3f} leg={leg_g:.3f}   ")
             sys.stdout.flush()
+            self.recent_preds.append(0)  # no_gesture
+            if len(self.recent_preds) > VOTE_WINDOW:
+                self.recent_preds = self.recent_preds[-VOTE_WINDOW:]
             return
 
         features = build_feature_vector(imu0_window, imu1_window)
@@ -244,8 +246,8 @@ class LiveInference:
 def main():
     parser = argparse.ArgumentParser(description="Live gesture inference")
     parser.add_argument("--weights-dir", default="weights_out_v2")
-    parser.add_argument("--broker", default="172.20.10.2")
-    parser.add_argument("--port", type=int, default=8883)
+    parser.add_argument("--broker", default="172.20.10.4")
+    parser.add_argument("--port", type=int, default=1883)
     parser.add_argument("--topic", default="firebeetle/raw")
     parser.add_argument("--window-size", type=int, default=WINDOW_SIZE)
     args = parser.parse_args()
@@ -259,9 +261,7 @@ def main():
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="live-tester")
 
-    # TLS setup — skip cert verification for now
-    client.tls_set(cert_reqs=ssl.CERT_NONE)
-    client.tls_insecure_set(True)
+    # No TLS — plain MQTT
 
     inference = LiveInference(model, args.window_size, mqtt_client=client)
 
@@ -288,7 +288,7 @@ def main():
     client.on_connect = on_connect
     client.on_message = on_message
 
-    print(f"Connecting to {args.broker}:{args.port} (TLS)...")
+    print(f"Connecting to {args.broker}:{args.port}...")
     try:
         client.connect(args.broker, args.port, keepalive=30)
     except ConnectionRefusedError:
