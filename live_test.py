@@ -37,12 +37,15 @@ SLIDE_STEP = 10           # predict every 10 new samples (0.2s)
 VOTE_WINDOW = 5          # require majority in last 5 predictions to emit
 VOTE_THRESHOLD = 3        # need 3/5 agreeing predictions to emit
 COOLDOWN_SECONDS = 1.8    # suppress after any gesture emit
-MOTION_THRESHOLD = 0.15   # gyro_std below this = idle (idle max=0.055, gestures p5≈0.08+)
+MOTION_THRESHOLD = 0.50   # gyro_std below this = idle (idle max=0.14, gestures min=0.87)
 
 # Sensor-pattern filter: which gestures require leg movement
-# move_forward(1), jump(4), turn_180(6) need both sensors
-NEEDS_LEG = {1, 4, 6}
+# move_forward(1), jump(4) need both sensors
+NEEDS_LEG = {1, 4}
 LEG_MOTION_THRESHOLD = 0.10  # higher than MOTION_THRESHOLD — leg must clearly be moving
+
+# turn_180 validation: arm gz std must exceed this to confirm rotation
+TURN180_GZ_STD_THRESHOLD = 2.1
 
 DEVICE_IMU0 = "arm"
 DEVICE_IMU1 = "leg"
@@ -155,6 +158,18 @@ class LiveInference:
             sys.stdout.write(f"\r  [LEG FILTER] {orig_name}->{new_name} leg={leg_g:.3f} < thresh={LEG_MOTION_THRESHOLD}   ")
             sys.stdout.flush()
 
+        # turn_180 validation: must have high arm gz rotation
+        if pred_class == 6:
+            arm_gz_std = np.std(imu0_window[:, 5])
+            if arm_gz_std < TURN180_GZ_STD_THRESHOLD:
+                sorted_classes = np.argsort(probs)[::-1]
+                for cls in sorted_classes:
+                    if cls != 6:
+                        pred_class = int(cls)
+                        break
+                sys.stdout.write(f"\r  [T180 FILTER] gz_std={arm_gz_std:.3f} < {TURN180_GZ_STD_THRESHOLD}, reclassified to {self.model.idx_to_name.get(pred_class, pred_class)}   ")
+                sys.stdout.flush()
+
         self.prediction_count += 1
         name = self.model.idx_to_name.get(pred_class, f"class_{pred_class}")
         confidence = probs[pred_class] * 100
@@ -208,8 +223,8 @@ class LiveInference:
         print(f"  Emit #{self.emit_count}")
         print(f"{'='*50}")
 
-        # Publish prediction to MQTT
-        if self.mqtt_client and self.mqtt_client.is_connected():
+        # Publish prediction to MQTT (only real gestures, not no_gesture)
+        if top_class != 0 and self.mqtt_client and self.mqtt_client.is_connected():
             payload = json.dumps({
                 "type": "gesture_prediction",
                 "window_index": self.emit_count,
@@ -220,8 +235,9 @@ class LiveInference:
             self.mqtt_client.publish(PREDICT_TOPIC, payload, qos=1)
             print(f"  [MQTT] Published to {PREDICT_TOPIC}: pred_class={top_class}")
 
-        # Clear vote buffer after emit to prevent re-firing
+        # Clear vote buffer and IMU data after emit to prevent re-firing
         self.recent_preds.clear()
+        self.buffers.clear()
 
     def _save_debug_window(self, imu0_window, imu1_window, predicted, confidence):
         """Save the raw window data so we can compare with training data."""

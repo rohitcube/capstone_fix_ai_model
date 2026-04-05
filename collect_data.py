@@ -15,7 +15,6 @@ Prerequisites:
 
 import csv
 import os
-import ssl
 import sys
 import time
 import threading
@@ -24,16 +23,15 @@ from collections import defaultdict
 import paho.mqtt.client as mqtt
 
 # ── Configuration ──
-BROKER_HOST = "172.20.10.2"
-BROKER_PORT = 8883
-CA_CERT_PATH = r"C:\capstone_repo\cg4002-b01-capstone\mosquitto\mosquitto-certs\ca.crt"
-MQTT_TOPIC = "firebeetle/imu"
+BROKER_HOST = "172.20.10.4"
+BROKER_PORT = 1883
+MQTT_TOPIC = "firebeetle/raw"
 SAVE_DIR = os.path.join(os.path.dirname(__file__), "data_v2")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 PERSON_ID = 1
 # 1 rohit
-# 2 
+# 2 isaac
 # 3 pradeep
 # 4 ansel
 # 5 keerthaan
@@ -203,20 +201,12 @@ def main():
     _count_existing_samples()
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="data-collector")
-    client.tls_set(
-        ca_certs=CA_CERT_PATH,
-        certfile=None,
-        keyfile=None,
-        cert_reqs=ssl.CERT_REQUIRED,
-        tls_version=ssl.PROTOCOL_TLS_CLIENT,
-    )
-    client.tls_insecure_set(False)
     client.on_connect = on_connect
     client.on_message = on_message
     client.on_subscribe = lambda c, u, m, rc, p=None: print(f"[MQTT] Subscribed successfully")
     client.on_disconnect = lambda c, u, d, rc, p=None: print(f"[MQTT] Disconnected: {rc}")
 
-    print(f"Connecting to MQTT broker at {BROKER_HOST}:{BROKER_PORT} (TLS)...")
+    print(f"Connecting to MQTT broker at {BROKER_HOST}:{BROKER_PORT}...")
     try:
         client.connect(BROKER_HOST, BROKER_PORT, keepalive=30)
     except ConnectionRefusedError:
