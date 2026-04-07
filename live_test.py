@@ -42,13 +42,14 @@ MOTION_THRESHOLD = 0.50   # gyro_std below this = idle (idle max=0.14, gestures 
 # Sensor-pattern filter: which gestures require leg movement
 # move_forward(1), jump(4) need both sensors
 NEEDS_LEG = {1, 4}
-LEG_MOTION_THRESHOLD = 0.10  # higher than MOTION_THRESHOLD — leg must clearly be moving
+LEG_MOTION_THRESHOLD = 0.55  # move_forward: real values ~0.55-0.62
+JUMP_LEG_THRESHOLD = 0.80    # jump: real values > 1.0, false positives < 0.5
 
 # turn_180 validation: arm gz std must exceed this to confirm rotation
 TURN180_GZ_STD_THRESHOLD = 2.1
 
-DEVICE_IMU0 = "arm"
-DEVICE_IMU1 = "leg"
+DEVICE_IMU0 = "arm_01"
+DEVICE_IMU1 = "leg_01"
 
 PREDICT_TOPIC = "u96/out"
 CA_CERT_PATH = r"C:\capstone_repo\cg4002-b01-capstone\mosquitto\mosquitto-certs\ca.crt"
@@ -146,16 +147,18 @@ class LiveInference:
         pred_class, probs = self.model.predict(features)
 
         # Sensor-pattern filter: if leg is idle, block gestures that need leg
-        if pred_class in NEEDS_LEG and leg_g < LEG_MOTION_THRESHOLD:
+        leg_thresh = JUMP_LEG_THRESHOLD if pred_class == 4 else LEG_MOTION_THRESHOLD
+        if pred_class in NEEDS_LEG and leg_g < leg_thresh:
             orig_name = self.model.idx_to_name.get(pred_class, f"class_{pred_class}")
             # Leg not moving — pick best class that doesn't need leg
             sorted_classes = np.argsort(probs)[::-1]
             for cls in sorted_classes:
-                if cls not in NEEDS_LEG or leg_g >= LEG_MOTION_THRESHOLD:
+                cls_thresh = JUMP_LEG_THRESHOLD if cls == 4 else LEG_MOTION_THRESHOLD
+                if cls not in NEEDS_LEG or leg_g >= cls_thresh:
                     pred_class = int(cls)
                     break
             new_name = self.model.idx_to_name.get(pred_class, f"class_{pred_class}")
-            sys.stdout.write(f"\r  [LEG FILTER] {orig_name}->{new_name} leg={leg_g:.3f} < thresh={LEG_MOTION_THRESHOLD}   ")
+            sys.stdout.write(f"\r  [LEG FILTER] {orig_name}->{new_name} leg={leg_g:.3f} < thresh={leg_thresh}   ")
             sys.stdout.flush()
 
         # turn_180 validation: must have high arm gz rotation
@@ -171,12 +174,20 @@ class LiveInference:
                 sys.stdout.flush()
 
         self.prediction_count += 1
+        self.last_logits = probs  # store for MQTT publish
         name = self.model.idx_to_name.get(pred_class, f"class_{pred_class}")
         confidence = probs[pred_class] * 100
 
         # Save debug window
         if DEBUG_SAVE_WINDOWS:
             self._save_debug_window(imu0_window, imu1_window, name, confidence)
+
+        # Treat no_gesture same as idle — skip silently
+        if pred_class == 0:
+            self.recent_preds.append(0)
+            if len(self.recent_preds) > VOTE_WINDOW:
+                self.recent_preds = self.recent_preds[-VOTE_WINDOW:]
+            return
 
         # Confidence gate
         if probs[pred_class] < 0.09:
@@ -229,7 +240,7 @@ class LiveInference:
                 "type": "gesture_prediction",
                 "window_index": self.emit_count,
                 "pred_class": int(top_class),
-                "logits": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "logits": [float(p) for p in self.last_logits],
                 "timestamp": time.time(),
             })
             self.mqtt_client.publish(PREDICT_TOPIC, payload, qos=1)
@@ -262,9 +273,11 @@ class LiveInference:
 def main():
     parser = argparse.ArgumentParser(description="Live gesture inference")
     parser.add_argument("--weights-dir", default="weights_out_v2")
-    parser.add_argument("--broker", default="172.20.10.4")
-    parser.add_argument("--port", type=int, default=1883)
-    parser.add_argument("--topic", default="firebeetle/raw")
+    parser.add_argument("--broker", default="172.20.10.4")       # HOME
+    # parser.add_argument("--broker", default="172.20.10.2")    # LAB: uncomment this, comment HOME
+    parser.add_argument("--port", type=int, default=1883)       # HOME
+    # parser.add_argument("--port", type=int, default=8883)     # LAB: uncomment this, comment HOME
+    parser.add_argument("--topic", default="firebeetle/imu/raw")
     parser.add_argument("--window-size", type=int, default=WINDOW_SIZE)
     args = parser.parse_args()
 
@@ -277,7 +290,10 @@ def main():
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="live-tester")
 
-    # No TLS — plain MQTT
+    # LAB: uncomment these 3 lines for TLS on port 8883
+    # import ssl
+    # client.tls_set(ca_certs=CA_CERT_PATH, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+    # client.tls_insecure_set(True)
 
     inference = LiveInference(model, args.window_size, mqtt_client=client)
 
@@ -287,18 +303,15 @@ def main():
 
     def on_message(client, userdata, msg, properties=None):
         try:
-            payload = msg.payload.decode(errors="ignore").strip()
-            parts = payload.split(",")
-            if len(parts) != 8:
+            data = json.loads(msg.payload.decode(errors="ignore"))
+            device_id = data.get("device_id", "")
+            if device_id not in (DEVICE_IMU0, DEVICE_IMU1):
                 return
+            p = data["payload"]
+            sample = [p["ax"], p["ay"], p["az"], p["gx"], p["gy"], p["gz"]]
         except Exception:
             return
 
-        device_id = parts[0]
-        if device_id not in (DEVICE_IMU0, DEVICE_IMU1):
-            return
-
-        sample = [float(parts[i]) for i in range(2, 8)]
         inference.push_sample(device_id, sample)
 
     client.on_connect = on_connect

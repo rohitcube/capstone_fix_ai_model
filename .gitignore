@@ -8,11 +8,13 @@
 data/
 data_backup/
 data_v2/
+old_move_forward/
 
 # Model weights
 weights_out/
 weights_out_v2/
 scaler_mean.npy
+fpga/
 
 # Python
 __pycache__/

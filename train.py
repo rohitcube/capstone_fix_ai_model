@@ -76,7 +76,36 @@ def export_weights_npy(model, scaler, out_dir):
         np.save(os.path.join(out_dir, f"{name}_bias.npy"), b.astype(np.float32))
         print(f"  {name}: W{W.shape}, b{b.shape}")
 
+    # Padded weights for FPGA (expects 8 outputs)
+    fpga_dir = os.path.join(out_dir, "fpga")
+    os.makedirs(fpga_dir, exist_ok=True)
+
+    # Copy scaler and hidden layers as-is
+    np.save(os.path.join(fpga_dir, "scaler_mean.npy"), scaler.mean_.astype(np.float32))
+    np.save(os.path.join(fpga_dir, "scaler_scale.npy"), scaler.scale_.astype(np.float32))
+
+    for layer, name in zip(dense_layers[:-1], names[:-1]):
+        W, b = layer.get_weights()
+        np.save(os.path.join(fpga_dir, f"{name}_weights.npy"), W.astype(np.float32))
+        np.save(os.path.join(fpga_dir, f"{name}_bias.npy"), b.astype(np.float32))
+
+    # Pad output layer to 8 classes
+    W_out, b_out = dense_layers[-1].get_weights()
+    num_model_classes = W_out.shape[1]
+    fpga_classes = 8
+
+    if num_model_classes < fpga_classes:
+        pad = fpga_classes - num_model_classes
+        W_out = np.pad(W_out, ((0, 0), (0, pad)), constant_values=0)
+        b_out = np.pad(b_out, (0, pad), constant_values=-10.0)  # large negative bias so padded classes never win
+        print(f"  Padded output: {num_model_classes} -> {fpga_classes} classes (bias=-10 for dummy classes)")
+
+    np.save(os.path.join(fpga_dir, "output_weights.npy"), W_out.astype(np.float32))
+    np.save(os.path.join(fpga_dir, "output_bias.npy"), b_out.astype(np.float32))
+    print(f"  output (fpga): W{W_out.shape}, b{b_out.shape}")
+
     print(f"Weights saved to {out_dir}")
+    print(f"FPGA weights saved to {fpga_dir}")
 
 
 def export_weights_header(out_dir):

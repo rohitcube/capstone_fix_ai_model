@@ -11,11 +11,11 @@ const char* WIFI_SSID       = "Rohit";
 const char* WIFI_PASSWORD   = "rohit123";
 const char* MQTT_BROKER_IP  = "172.20.10.4";    // Laptop IP on phone hotspot
 const uint16_t MQTT_PORT    = 1883;
-const char* MQTT_TOPIC      = "firebeetle/raw";
+const char* MQTT_TOPIC      = "firebeetle/imu/raw";
 
 // *** CHANGE THIS BEFORE FLASHING EACH BOARD ***
-// Board 1: "arm"    Board 2: "leg"
-const char* DEVICE_NAME     = "leg";
+// Board 1: "arm_01"    Board 2: "leg_01"
+const char* DEVICE_NAME     = "leg_01";
 
 const int SAMPLE_RATE_MS = 20; // 50 Hz
 
@@ -27,6 +27,7 @@ Adafruit_MPU6050 mpu;
 
 unsigned long lastMqttRetryMs = 0;
 unsigned long lastSampleMs = 0;
+unsigned long seqNum = 0;
 
 void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
@@ -80,7 +81,7 @@ void setup() {
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
 
   mqttClient.setServer(MQTT_BROKER_IP, MQTT_PORT);
-  mqttClient.setBufferSize(256);
+  mqttClient.setBufferSize(512);
 
   connectWiFi();
   connectMQTT();
@@ -105,13 +106,16 @@ void loop() {
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
 
-    // Format: device_name,timestamp,ax,ay,az,gx,gy,gz
-    char buf[150];
-    snprintf(buf, sizeof(buf), "%s,%lu,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f",
-             DEVICE_NAME, now,
-             a.acceleration.x, a.acceleration.y, a.acceleration.z,
-             g.gyro.x, g.gyro.y, g.gyro.z);
+    char buf[400];
+    snprintf(buf, sizeof(buf),
+      "{\"type\":\"imu_data\",\"device_id\":\"%s\",\"sample_id\":0,\"recording\":false,"
+      "\"timestamp\":%lu,\"seq\":%lu,"
+      "\"payload\":{\"ax\":%.9f,\"ay\":%.9f,\"az\":%.9f,\"gx\":%.9f,\"gy\":%.9f,\"gz\":%.9f}}",
+      DEVICE_NAME, now, seqNum++,
+      a.acceleration.x, a.acceleration.y, a.acceleration.z,
+      g.gyro.x, g.gyro.y, g.gyro.z);
 
     mqttClient.publish(MQTT_TOPIC, buf);
   }
 }
+
